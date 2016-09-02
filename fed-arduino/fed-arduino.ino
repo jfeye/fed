@@ -23,6 +23,18 @@
 // Photo interrupter is also the wakeup for the system
 #define PHOTO_INTERRUPTER_PIN 2
 
+// feeding will be stopped in the specified timeframes
+// {09,15,21,15} will stop feeding between 9:15 and 21:15
+//
+// example:
+// const char blockedTime[][] = {
+//  {09,00,10,00},
+//  {11,30,12,30}
+// };
+const uint8_t blockedTime[][4] = {
+  {9,0,21,0}
+};
+
 SoftwareSerial LEDserial = SoftwareSerial(DISPLAY_SERIAL_RX_PIN, DISPLAY_SERIAL_TX_PIN);
 SdFat SD;
 
@@ -94,8 +106,8 @@ void setup()
 
   // make all unused pins inputs with pullups enabled by default, lowest power drain
   // leave pins 0 & 1 (Arduino RX and TX) as they are
-  for (byte i=2; i <= 20; i++) {    
-    pinMode(i, INPUT_PULLUP);     
+  for (byte i=2; i <= 20; i++) {
+    pinMode(i, INPUT_PULLUP);
   }
   ADCSRA = 0;  // disable ADC as we won't be using it
   power_adc_disable(); // ADC converter
@@ -106,20 +118,20 @@ void setup()
   Serial.println(F("Starting up..."));
 
   // Display setup
-  LEDserial.begin(9600); 
+  LEDserial.begin(9600);
   pinMode(DISPLAY_SERIAL_TX_PIN, OUTPUT);
   setDisplayBrightness(64);
   clearDisplay();
   delay(1); // allow a very short delay for display response
   setDisplayValues(pelletCount);
-  
+
   pinMode(PHOTO_INTERRUPTER_PIN, INPUT);
   pinMode(TTL_DEBUG_PIN, OUTPUT);
   pinMode(CS_pin, OUTPUT);
   pinMode(SS, OUTPUT);
 
   Wire.begin();
-  
+
   // both the stepper control and RTC use I2C (the Wire library)
   RTC.begin(); // RTC library needs Wire
 
@@ -156,9 +168,9 @@ void setup()
     dataFile.println(F("Time,Pellet Count,Pellet Drop Delay"));
     dataFile.close();
   }
-    
+
   delay (500);
-  
+
   // get ready for what the system should be doing
   PIState = digitalRead(PHOTO_INTERRUPTER_PIN);
   lastState = 0;
@@ -166,13 +178,25 @@ void setup()
 
 void loop()
 {
+  // check if current time is in a blocked timeframe
+  bool blocked = false;
+  DateTime datetime = RTC.now();
+  uint8_t hour = datetime.hour();
+  uint8_t min = datetime.minute();
+  for(int i=0; i<sizeof(blockedTime/4); i++){
+    if((blockedTime[i][0] < hour || (blockedTime[i][0] == hour && blockedTime[i][1] <= min)) && // curent time is after blocked start time
+       (blockedTime[i][2] > hour || (blockedTime[i][2] == hour && blockedTime[i][3] >= min)) {  // curent time is before blocked end time
+      blocked = true;
+    }
+  }
+
   PIState = digitalRead(PHOTO_INTERRUPTER_PIN);
   Serial.print("Photointerrupter State: ");
   Serial.println(PIState);
   digitalWrite(TTL_DEBUG_PIN, LOW);
 
-  if (PIState == 1  & PIState != lastState) {    
-    digitalWrite(TTL_DEBUG_PIN, HIGH);    
+  if (PIState == 1  && PIState != lastState && !blocked) {
+    digitalWrite(TTL_DEBUG_PIN, HIGH);
     startTime = millis();
     Serial.print(F("Time Elapsed Check: "));
     Serial.println(timeElapsed);
@@ -194,19 +218,19 @@ void loop()
     power_twi_disable();
     lastState = PIState;
   }
-  
+
   else if (PIState == 0 & PIState != lastState) {
     Serial.print(F("Time Elapsed Since Last Pellet: "));
     timeElapsed = millis() - startTime;
     Serial.println(timeElapsed);
     lastState = PIState;
   }
-    
+
   else  {
     lastState = PIState;
     enterSleep();
   }
-  
+
   delay(100);
 }
 
@@ -239,7 +263,7 @@ void printDigits(byte digits) {
 
 void enterSleep()
 {
-  power_usart0_disable();// Serial (USART) 
+  power_usart0_disable();// Serial (USART)
 
   sleep_enable();
 
@@ -287,6 +311,3 @@ void setDisplayValues(int value)
 {
   LEDserial.print(value);
 }
-
-
-
